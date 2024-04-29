@@ -2,7 +2,7 @@
   "name": "singularo/dsh",
   "description": "Composer plugin and scripts for getting up developing quickly with Drupal.",
   "type": "composer-plugin",
-  "license": "GPL-2.0+",
+  "license": "GPL-2.0-or-later",
   "require": {
     "php": ">=8.1",
     "composer-plugin-api": "^1.1 || ^2",
@@ -12,7 +12,7 @@
     "drush/drush": "^11 || ^12"
   },
   "require-dev": {
-    "composer/composer": "^1.10",
+    "composer/composer": "^1.10"
   },
   "autoload": {
     "psr-4": {
