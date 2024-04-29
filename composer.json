@@ -1,6 +1,6 @@
 {
-  "name": "singularo/shepherd-drupal-scaffold",
-  "description": "Composer Plugin for updating the Shepherd Drupal tools.",
+  "name": "singularo/dsh",
+  "description": "Composer plugin and scripts for getting up developing quickly with Drupal.",
   "type": "composer-plugin",
   "license": "GPL-2.0+",
   "require": {
@@ -13,9 +13,6 @@
   },
   "require-dev": {
     "composer/composer": "^1.10",
-    "drupal/coder": "^8.3",
-    "roave/security-advisories": "dev-latest",
-    "squizlabs/php_codesniffer": "^3.5"
   },
   "autoload": {
     "psr-4": {
