@@ -47,7 +47,6 @@ RUN echo "www-data ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/www-data \
 && echo "Set disable_coredump false" >> /etc/sudo.conf
 
 # Enable xdebug & custom settings
-RUN phpenmod -v ALL -s ALL xdebug
 RUN phpenmod -v ALL -s ALL custom
 
 USER www-data
