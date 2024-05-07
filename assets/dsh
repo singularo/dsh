@@ -234,7 +234,7 @@ dsh_purge() {
 
   # Get the image lines from the compose files.
   # shellcheck disable=SC2086
-  RESULTS=$(grep image ${COMPOSE_FILE//:/ })
+  RESULTS=$(grep 'image:' ${COMPOSE_FILE//:/ })
 
   # Set the field separator, then convert the results to an array.
   IFS=$'\n'
