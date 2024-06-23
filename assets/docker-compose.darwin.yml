@@ -35,7 +35,7 @@ services:
       DTT_BASE_URL: http://${PROJECT}.${DOMAIN:-127.0.0.1.nip.io}:8080
 
       SHEPHERD_REVERSE_PROXY: 1
-      SHEPHERD_REVERSE_PROXY_ADDRESSES: 127.0.0.1,172.17.0.0/16
+      SHEPHERD_REVERSE_PROXY_ADDRESSES: 127.0.0.1,172.17.0.0/24
       SHEPHERD_REVERSE_PROXY_TRUSTED: 26
 
       # Use jwilder/nginx-proxy for virtual hosts.
