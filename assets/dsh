@@ -152,11 +152,11 @@ dsh_shell() {
   # permission issues.
   EXISTING_USER=$(${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u www-data | sed -e 's/\r//g')
   if [ "${EXISTING_USER}" != "${USER_ID}" ]; then
-    if ! ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u ${USER} >/dev/null 2>&1; then
+    if ! ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u "${USER}" >/dev/null 2>&1; then
       notice "Setting up user $USER on web container."
       # Add user with local $USER name to container.
       ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} adduser --disabled-password --uid ${UID} \
-        --gecos ${USER} --home /home/${USER} ${USER} >/dev/null
+        --gecos "${USER}" --home "/home/${USER}" "${USER}" >/dev/null
       # Allow sudo without password for user.
       ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} /bin/bash -c "echo '${USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/${USER}"
     fi
@@ -207,9 +207,9 @@ dsh_shell() {
   options+=("--env LINES=\"$(tput lines)\"")
 
   ${DOCKER_COMPOSE} exec \
-    -u ${USER} \
-    ${options[@]} \
-    ${SHELL_CONTAINER} ${@:-./dsh_bash}
+    -u "${USER}" \
+    "${options[@]}" \
+    ${SHELL_CONTAINER} "${@:-./dsh_bash}"
 }
 
 # Command: ./dsh stop
@@ -246,7 +246,7 @@ dsh_purge() {
   do
     # Remove the parts of the line we don't need.
     IMAGE=${LINE#*image: }
-    docker rmi -f ${IMAGE}
+    docker rmi -f "${IMAGE}"
   done
 }
 
