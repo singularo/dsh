@@ -208,7 +208,7 @@ dsh_shell() {
 
   ${DOCKER_COMPOSE} exec \
     -u "${USER}" \
-    "${options[@]}" \
+    ${options[@]} \
     ${SHELL_CONTAINER} "${@:-./dsh_bash}"
 }
 
