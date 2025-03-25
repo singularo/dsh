@@ -3,17 +3,18 @@
 # Helper script that is run inside docker to setup ssh access
 # for mac (linux happens automatically)
 #
+if [[ "${HOST_TYPE}" =~ 'darwin' ]]; then
+  # If the new style socket exists on mac, make it accessible.
+  if [ -S /run/host-services/ssh-auth.sock ]; then
+    sudo chmod 777 /run/host-services/ssh-auth.sock
+  fi
 
-# If the new style socket exists on mac, make it accessible.
-if [ -S /run/host-services/ssh-auth.sock ]; then
-  sudo chmod 777 /run/host-services/ssh-auth.sock
-fi
-
-# Check if we now have any identities, if not, try and setup manually.
-ssh-add -l &> /dev/null
-if [ "$?" == 2 ]; then
-  eval $(ssh-agent -s)
-  ssh-add ~/.ssh/id_rsa
+  # Check if we now have any identities, if not, try and setup manually.
+  ssh-add -l &> /dev/null
+  eval "$(ssh-agent -s)"
+  if [ "$?" == 2 ] && [ -f ~/.ssh/id_rsa ]; then
+    ssh-add ~/.ssh/id_rsa
+  fi
 fi
 
 # Drop user into bash
