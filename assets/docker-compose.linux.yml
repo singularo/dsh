@@ -12,7 +12,7 @@ services:
     environment:
       CONFIG_SYNC_DIR: ../config/sync
       DATABASE_HOST: db
-      DATABASE_USER: user
+      DATABASE_USER: drupal
       DATABASE_PASSWORD: password
       DRUSH_OPTIONS_URI: http://${PROJECT}.${DOMAIN:-172.17.0.1.nip.io}:8080
       HASH_SALT: random-hash
@@ -61,7 +61,7 @@ services:
     image: mariadb
     environment:
       MYSQL_DATABASE: drupal
-      MYSQL_USER: user
+      MYSQL_USER: drupal
       MYSQL_PASSWORD: password
       MYSQL_ROOT_PASSWORD: super-secret-password
     networks:
