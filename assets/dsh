@@ -23,6 +23,7 @@ export COMPOSER_PROJECT
 HOST_TYPE=$(uname | tr '[:upper:]' '[:lower:]')
 COMPOSE_FILE="docker-compose.${HOST_TYPE}.yml"
 DOCKER_COMPOSE="docker-compose --ansi never"
+DOCKER_COMPOSE_QUIET="docker-compose --ansi never --progress quiet"
 SHELL_CONTAINER=web
 
 # Set domain default if its not set.
@@ -84,15 +85,19 @@ fi
 setup_nginx() {
   # Check if its running/exists already and start if required.
   if docker ps -a --format "{{.Names}}" | grep nginx-proxy > /dev/null; then
-    warning "Restarting nginx proxy"
+    if [ "${1:-}" != "quiet" ]; then
+      warning "Restarting nginx proxy"
+    fi
     docker restart nginx-proxy > /dev/null
   else
-    warning "Starting nginx proxy"
+    if [ "${1:-}" != "quiet" ]; then
+      warning "Starting nginx proxy"
+    fi
     docker run -d -p 8080:80  \
       -v /var/run/docker.sock:/tmp/docker.sock:ro \
       -v ./docker/dsh_proxy.conf:/etc/nginx/conf.d/dsh_proxy.conf \
       --restart always --name nginx-proxy \
-      nginxproxy/nginx-proxy:1.3.1
+      nginxproxy/nginx-proxy:1.3.1 > /dev/null
   fi
 
   if ! docker ps --format "{{.Names}}" --filter "name=^nginx-proxy$" > /dev/null; then
@@ -103,8 +108,10 @@ setup_nginx() {
   URL="http://${PROJECT}.${DOMAIN}:8080"
   NGINX_IP=$(docker inspect --format "{{with index .NetworkSettings.Networks \"${PROJECT}_default\"}}{{.IPAddress}}{{end}}" nginx-proxy)
   if [[ ! ${NGINX_IP} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    notice "Connecting nginx-proxy to the network."
-    docker network connect "${PROJECT}_default" nginx-proxy
+    if [ "${1:-}" != "quiet" ]; then
+      notice "Connecting nginx-proxy to the network."
+    fi
+    docker network connect "${PROJECT}_default" nginx-proxy > /dev/null
   fi
   set -e
 }
@@ -114,7 +121,7 @@ stop_nginx() {
   if docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$" > /dev/null; then
     notice "Disconnecting nginx proxy from network."
     set +e
-    docker network disconnect "${PROJECT}_default" nginx-proxy > /dev/null
+    docker network disconnect "${PROJECT}_default" nginx-proxy > /dev/null 2>&1
     set -e
   fi
 }
@@ -123,18 +130,30 @@ stop_nginx() {
 # Configures environment then brings up project using docker-compose.yml file.
 dsh_start() {
   if [[ ! $(docker ps --format "{{.Names}}" --filter "name=^${PROJECT}_web") =~ ${PROJECT}_web ]]; then
-    notice "Starting containers."
-    ${DOCKER_COMPOSE} up -d
+    set +u
+    if [ "${1:-}" != "quiet" ]; then
+      notice "Starting containers."
+    fi
+    set -u
+    if [ "${1:-}" != "quiet" ]; then
+      ${DOCKER_COMPOSE} up -d
+    else
+      ${DOCKER_COMPOSE_QUIET} up -d
+    fi
     # Too slow to leave in # ${DOCKER_COMPOSE} build --parallel
     if [[ ! $(docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$") =~ ${PROJECT}_default ]]; then
-      notice "Creating network."
-      docker network create "${PROJECT}_default"
+      set +u
+      if [ "${1:-}" != "quiet" ]; then
+        notice "Creating network."
+      fi
+      set -u
+      docker network create "${PROJECT}_default" > /dev/null
     fi
-    setup_nginx
+    setup_nginx "${1:-}"
 
     URL="http://${PROJECT}.${DOMAIN}:8080"
     set +u
-    if [ "$1" != "quiet" ]; then
+    if [ "${1:-}" != "quiet" ]; then
       notice "Please wait about 10 seconds for the database to settle.
 The project is now available at: ${URL}.
 Files are available in /code, You may need to 'robo build' to install."
@@ -146,7 +165,12 @@ Files are available in /code, You may need to 'robo build' to install."
 # Command: ./dsh shell
 # Connects a shell to the web image as the current user.
 dsh_shell() {
-  dsh_start
+  # Check if we're running a command (not interactive shell)
+  if [ $# -gt 0 ]; then
+    dsh_start quiet
+  else
+    dsh_start
+  fi
 
   # Setup docker to run the shell as the current user, thus removing any
   # permission issues.
@@ -158,7 +182,7 @@ dsh_shell() {
       ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} adduser --disabled-password --uid ${UID} \
         --gecos "${USER}" --home "/home/${USER}" "${USER}" >/dev/null
       # Allow sudo without password for user.
-      ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} /bin/bash -c "echo '${USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/${USER}"
+      ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} /bin/bash -c "echo '${USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/${USER}" > /dev/null
     fi
   else
     USER=www-data
@@ -203,11 +227,14 @@ dsh_shell() {
   # These things should always be present.
   options+=("--env PROJECT=${PROJECT}")
   options+=("--env DOMAIN=${DOMAIN}")
-  options+=("--env COLUMNS=\"$(tput cols)\"")
-  options+=("--env LINES=\"$(tput lines)\"")
+  options+=("--env COLUMNS=$(tput cols)")
+  options+=("--env LINES=$(tput lines)")
+  options+=("--env TERM=${TERM:-xterm}")
 
+  # Always allocate TTY for interactive commands and prompts
   ${DOCKER_COMPOSE} exec \
     -u "${USER}" \
+    -it \
     ${options[@]} \
     ${SHELL_CONTAINER} "${@:-./dsh_bash}"
 }
@@ -217,7 +244,7 @@ dsh_shell() {
 dsh_stop() {
   notice "Stopping containers."
   stop_nginx
-  ${DOCKER_COMPOSE} stop
+  ${DOCKER_COMPOSE_QUIET} stop
 }
 
 # Command: ./dsh down
@@ -225,7 +252,7 @@ dsh_stop() {
 dsh_down() {
   stop_nginx
   notice "Removing containers."
-  ${DOCKER_COMPOSE} down -v
+  ${DOCKER_COMPOSE_QUIET} down -v
 }
 
 # Command: ./dsh purge
@@ -246,7 +273,7 @@ dsh_purge() {
   do
     # Remove the parts of the line we don't need.
     IMAGE=${LINE#*image: }
-    docker rmi -f "${IMAGE}"
+    docker rmi -f "${IMAGE}" > /dev/null 2>&1
   done
 }
 
@@ -259,23 +286,22 @@ dsh_status() {
 # Command: ./dsh logs
 # Tails logs from web container.
 dsh_logs() {
-  ${DOCKER_COMPOSE} logs --tail=100 -f web
+  ${DOCKER_COMPOSE} logs -f web
 }
 
 # Command: ./dsh pull
 # Fetches all images used by the project.
 dsh_pull() {
   # docker-compose doesn't resolve sub-dependencies in Dockerfiles.
-  docker pull singularo/s2i-shepherd-drupal
-  ${DOCKER_COMPOSE} pull --ignore-pull-failures
-  ${DOCKER_COMPOSE} build
+  docker pull singularo/s2i-shepherd-drupal > /dev/null
+  ${DOCKER_COMPOSE_QUIET} pull --ignore-pull-failures
+  ${DOCKER_COMPOSE_QUIET} build
 }
 
 dsh_help() {
-  printf "\nUsage: dsh COMMAND\n
+  printf "\nUsage: dsh [COMMAND] [ARGS...]\n
 Commands:
 \t down\tShutdown and destroy the containers.
-\t exec\tExecute a command in the container.
 \t help\tShow this help.
 \t logs\tShow the container logs with tail -f - ctrl-c to exit.
 \t pull\tPull the latest container images.
@@ -285,7 +311,8 @@ Commands:
 \t status\tShow the status of this projects containers.
 \t stop\tStop the docker containers, network and proxy, but keep data for a re-start.
 \nIf no command is given, shell is the default.
-Commands can be shortened to their unique component, eg ./dsh sh is the same as ./dsh shell.\n\n"
+Commands can be shortened to their unique component, eg ./dsh sh is the same as ./dsh shell.
+Any other arguments will be executed as a command in the container.\n\n"
 }
 
 # Set a default command to show usage when no arguments provided.
@@ -294,9 +321,6 @@ COMMAND=${1:-default}
 case ${COMMAND} in
   dow*)
     dsh_down
-    ;;
-  e*)
-    dsh_shell "${@:2}"
     ;;
   h*|-h|--help)
     dsh_help
@@ -322,8 +346,12 @@ case ${COMMAND} in
   sto*)
     dsh_stop
     ;;
-  *)
+  default)
     warning "Starting shell. For other options try $0 help."
     dsh_shell
+    ;;
+  *)
+    # Execute the command and its arguments in the container
+    dsh_shell "$@"
     ;;
 esac
