@@ -286,7 +286,7 @@ dsh_status() {
 # Command: ./dsh logs
 # Tails logs from web container.
 dsh_logs() {
-  ${DOCKER_COMPOSE} logs -f web
+  ${DOCKER_COMPOSE} logs -n 100 -f web
 }
 
 # Command: ./dsh pull
