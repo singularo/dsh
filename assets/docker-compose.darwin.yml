@@ -8,7 +8,7 @@ services:
         GROUP_ID: ${GROUP_ID:-1000}
     # This image is the local development version, built using the above details.
     image: myproject/s2i-shepherd-local:develop
-    hostname: ${PROJECT}.${DOMAIN:-127.0.0.1.nip.io}
+    hostname: ${PROJECT:?error}.${DOMAIN:-127.0.0.1.nip.io}
     environment:
       CONFIG_SYNC_DIR: ../config/sync
       DATABASE_HOST: db

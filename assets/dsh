@@ -231,12 +231,31 @@ dsh_shell() {
   options+=("--env LINES=$(tput lines)")
   options+=("--env TERM=${TERM:-xterm}")
 
-  # Always allocate TTY for interactive commands and prompts
-  ${DOCKER_COMPOSE} exec \
-    -u "${USER}" \
-    -it \
-    ${options[@]} \
-    ${SHELL_CONTAINER} "${@:-./dsh_bash}"
+  # Handle command execution
+  if [ $# -gt 0 ]; then
+    # Check if we're in a pipeline (output being captured)
+    if [ ! -t 1 ]; then
+      # Output is being piped/redirected, don't allocate TTY
+      ${DOCKER_COMPOSE} exec \
+        -u "${USER}" \
+        ${options[@]} \
+        ${SHELL_CONTAINER} bash -c "$*"
+    else
+      # Interactive command, allocate TTY
+      ${DOCKER_COMPOSE} exec \
+        -u "${USER}" \
+        -it \
+        ${options[@]} \
+        ${SHELL_CONTAINER} bash -c "$*"
+    fi
+  else
+    # For interactive shell, use default behavior
+    ${DOCKER_COMPOSE} exec \
+      -u "${USER}" \
+      -it \
+      ${options[@]} \
+      ${SHELL_CONTAINER} ./dsh_bash
+  fi
 }
 
 # Command: ./dsh stop
@@ -262,11 +281,13 @@ dsh_purge() {
 
   # Get the image lines from the compose files.
   # shellcheck disable=SC2086
-  RESULTS=$(grep 'image:' ${COMPOSE_FILE//:/ })
+  RESULTS=$(grep -h 'image:' ${COMPOSE_FILE//:/ })
 
   # Set the field separator, then convert the results to an array.
-  IFS=$'\n'
-  mapfile -t LINES <<< "${RESULTS}"
+  LINES=()
+  while IFS= read -r line; do
+    LINES+=("$line")
+  done <<< "$RESULTS"
 
   # Loop through the array and delete the images.
   for LINE in "${LINES[@]}"
@@ -325,7 +346,7 @@ case ${COMMAND} in
   h*|-h|--help)
     dsh_help
     ;;
-  l*)
+  log*)
     dsh_logs
     ;;
   pul*)
