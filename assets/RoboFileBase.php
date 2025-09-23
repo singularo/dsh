@@ -243,7 +243,6 @@ abstract class RoboFileBase extends Tasks {
     $this->devCacheRebuild();
   }
 
-
   /**
    * Override the cache rebuild to also restart php.
    */
@@ -265,7 +264,8 @@ abstract class RoboFileBase extends Tasks {
    * @aliases debug
    */
   public function devXdebugEnable(bool $reload = TRUE): void {
-    if (!getenv('XDEBUG_CONFIG')) {
+    if (!getenv('XDEBUG_CONFIG') && !getenv('XDEBUG_MODE')) {
+      $this->say('Environment variables not setup for xdebug');
       return;
     }
     if (extension_loaded('xdebug')) {
@@ -298,7 +298,8 @@ abstract class RoboFileBase extends Tasks {
    * @aliases nodebug
    */
   public function devXdebugDisable(bool $reload = TRUE): void {
-    if (!getenv('XDEBUG_CONFIG')) {
+    if (!getenv('XDEBUG_CONFIG') && !getenv('XDEBUG_MODE')) {
+      $this->say('Environment variables not setup for xdebug');
       return;
     }
     if (!extension_loaded('xdebug')) {
