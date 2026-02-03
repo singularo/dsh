@@ -232,32 +232,26 @@ dsh_shell() {
   fi
 
   # Build array of environment variables to pass to the container.
-  set +u
   options=()
 
-  # Pass through optional testing and monitoring environment variables if set.
-  OPTIONAL_ENV_VARS=(
-    "DTT_BASE_URL"
-    "DTT_MINK_DRIVER_ARGS"
-    "SIMPLETEST_BASE_URL"
-    "SIMPLETEST_DB"
-    "NEWRELIC_ENABLED"
-    "NEWRELIC_APP"
-    "NEWRELIC_LICENSE"
-  )
+  # Helper: add env var only if set on host.
+  add_env_if_set() {
+    local var=$1 container_var=${2:-$1}
+    set +u; local value="${!var:-}"; set -u
+    [ -n "$value" ] && add_env "$container_var" "$value"
+  }
 
-  for var in "${OPTIONAL_ENV_VARS[@]}"; do
-    if [ -n "${!var:-}" ]; then
-      options+=("--env ${var}=${!var}")
-    fi
-  done
+  # Optional testing and monitoring variables.
+  add_env_if_set DTT_BASE_URL
+  add_env_if_set DTT_MINK_DRIVER_ARGS
+  add_env_if_set SIMPLETEST_BASE_URL
+  add_env_if_set SIMPLETEST_DB
+  add_env_if_set NEWRELIC_ENABLED
+  add_env_if_set NEWRELIC_APP
+  add_env_if_set NEWRELIC_LICENSE
+  add_env_if_set CONTAINER_SSH_AUTH_SOCK SSH_AUTH_SOCK
 
-  if [ -n "${CONTAINER_SSH_AUTH_SOCK}" ]; then
-    options+=("--env SSH_AUTH_SOCK=${CONTAINER_SSH_AUTH_SOCK}")
-  fi
-  set -u
-
-  # These things should always be present.
+  # Required variables.
   options+=("--env PROJECT=${PROJECT}")
   options+=("--env DOMAIN=${DOMAIN}")
   options+=("--env COLUMNS=$(tput cols)")
