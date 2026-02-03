@@ -17,6 +17,18 @@ use Robo\Tasks;
 abstract class RoboFileBase extends Tasks {
 
   /**
+   * Services.yml replacement patterns for debug mode.
+   */
+  protected const TWIG_DEBUG_FALSE = 'debug: false';
+  protected const TWIG_DEBUG_TRUE = 'debug: true';
+  protected const TWIG_AUTO_RELOAD_NULL = 'auto_reload: null';
+  protected const TWIG_AUTO_RELOAD_TRUE = 'auto_reload: true';
+  protected const TWIG_CACHE_TRUE = 'cache: true';
+  protected const TWIG_CACHE_FALSE = 'cache: false';
+  protected const HTTP_CACHE_DEBUG_TRUE = 'http.response.debug_cacheability_headers: true';
+  protected const HTTP_CACHE_DEBUG_FALSE = 'http.response.debug_cacheability_headers: false';
+
+  /**
    * The drupal profile to install.
    *
    * @var string
@@ -53,10 +65,16 @@ abstract class RoboFileBase extends Tasks {
 
   /**
    * Initialize config variables and apply overrides.
+   *
+   * @throws \RuntimeException
+   *   If required commands are not available.
    */
   public function __construct() {
     // Default to stopping on failures.
     $this->stopOnFail(TRUE);
+
+    // Validate that required commands are available.
+    $this->validateRequiredCommands();
 
     // Read config from environment variables.
     $environmentConfig = $this->readConfigFromEnv();
@@ -76,9 +94,30 @@ abstract class RoboFileBase extends Tasks {
   }
 
   /**
+   * Validate that required external commands are available.
+   *
+   * @throws \RuntimeException
+   *   If a required command is not found in PATH.
+   */
+  protected function validateRequiredCommands(): void {
+    $requiredCommands = ['drush', 'composer'];
+
+    foreach ($requiredCommands as $command) {
+      // Use 'command -v' to check if command exists (POSIX compliant).
+      $result = shell_exec("command -v $command 2>/dev/null");
+      if (empty($result)) {
+        throw new \RuntimeException("Required command '$command' not found in PATH. Please install $command.");
+      }
+    }
+  }
+
+  /**
    * Confirm the installation profile is set.
    *
    * Runs during the constructor; be careful not to use Robo methods.
+   *
+   * @throws \RuntimeException
+   *   If SHEPHERD_INSTALL_PROFILE environment variable is not defined.
    */
   protected function setDrupalProfile(): void {
     $profile = getenv('SHEPHERD_INSTALL_PROFILE');
@@ -98,17 +137,18 @@ abstract class RoboFileBase extends Tasks {
    *   The sanitised config array.
    */
   protected function readConfigFromEnv(): array {
-    $config = [];
-
-    // Site.
-    $config['site']['title']          = getenv('SITE_TITLE');
-    $config['site']['mail']           = getenv('SITE_MAIL');
-    $config['site']['admin_email']    = getenv('SITE_ADMIN_EMAIL');
-    $config['site']['admin_user']     = getenv('SITE_ADMIN_USERNAME');
-    $config['site']['admin_password'] = getenv('SITE_ADMIN_PASSWORD');
-
-    // Environment.
-    $config['environment']['hash_salt'] = getenv('HASH_SALT');
+    $config = [
+      'site' => [
+        'title' => getenv('SITE_TITLE'),
+        'mail' => getenv('SITE_MAIL'),
+        'admin_email' => getenv('SITE_ADMIN_EMAIL'),
+        'admin_user' => getenv('SITE_ADMIN_USERNAME'),
+        'admin_password' => getenv('SITE_ADMIN_PASSWORD'),
+      ],
+      'environment' => [
+        'hash_salt' => getenv('HASH_SALT'),
+      ],
+    ];
 
     // Clean up NULL values and empty arrays.
     $arrayClean = static function (&$item) use (&$arrayClean) {
@@ -176,29 +216,34 @@ abstract class RoboFileBase extends Tasks {
       $this->say("Setting site path.");
       $this->taskReplaceInFile("$this->applicationRoot/.htaccess")
         ->from('# RewriteBase /drupal')
-        ->to("\n  RewriteBase /" . ltrim($this->config['site']['path'], '/') . "\n");
+        ->to("\n  RewriteBase /" . ltrim($this->config['site']['path'], '/') . "\n")
+        ->run();
     }
   }
 
   /**
    * Clean the application root in preparation for a new build.
    *
-   * @throws \Robo\Exception\TaskException
+   * @throws \RuntimeException
    */
   public function buildClean(): void {
-    $stack = $this->taskExecStack()
-      ->stopOnFail()
-      ->exec("rm -fR $this->applicationRoot/core")
-      ->exec("rm -fR $this->applicationRoot/modules/contrib")
-      ->exec("rm -fR $this->applicationRoot/profiles/contrib")
-      ->exec("rm -fR $this->applicationRoot/themes/contrib")
-      ->exec("rm -fR $this->applicationRoot/sites/all")
-      ->exec('rm -fR bin')
-      ->exec('rm -fR vendor');
+    $filesystem = new \Symfony\Component\Filesystem\Filesystem();
 
-    $result = $stack->run();
-    if (!$result->wasSuccessful()) {
-      throw new \RuntimeException('Build clean failed.');
+    $pathsToRemove = [
+      "$this->applicationRoot/core",
+      "$this->applicationRoot/modules/contrib",
+      "$this->applicationRoot/profiles/contrib",
+      "$this->applicationRoot/themes/contrib",
+      "$this->applicationRoot/sites/all",
+      'bin',
+      'vendor',
+    ];
+
+    try {
+      $filesystem->remove($pathsToRemove);
+    }
+    catch (\Exception $e) {
+      throw new \RuntimeException('Build clean failed: ' . $e->getMessage());
     }
   }
 
@@ -219,10 +264,10 @@ abstract class RoboFileBase extends Tasks {
    * across builds. This function is used as part of the build to get that
    * from an environment var, often defined in the docker-compose.*.yml file.
    *
-   * @return string|bool
+   * @return string|false
    *   Return either a valid site uuid, or false if there is none.
    */
-  protected function getSiteUuid() {
+  protected function getSiteUuid(): string|false {
     return getenv('SITE_UUID');
   }
 
@@ -254,6 +299,16 @@ abstract class RoboFileBase extends Tasks {
   }
 
   /**
+   * Check if xdebug environment variables are configured.
+   *
+   * @return bool
+   *   TRUE if xdebug is configured via environment variables.
+   */
+  private function isXdebugConfigured(): bool {
+    return getenv('XDEBUG_CONFIG') || getenv('XDEBUG_MODE');
+  }
+
+  /**
    * Debug enable.
    *
    * Xdebug enable is typically long-lived, so there is no flag to re-disable.
@@ -261,10 +316,13 @@ abstract class RoboFileBase extends Tasks {
    * @param bool $reload
    *   Whether to reload the service.
    *
+   * @throws \RuntimeException
+   *   If xdebug cannot be enabled.
+   *
    * @aliases debug
    */
   public function devXdebugEnable(bool $reload = TRUE): void {
-    if (!getenv('XDEBUG_CONFIG') && !getenv('XDEBUG_MODE')) {
+    if (!$this->isXdebugConfigured()) {
       $this->say('Environment variables not setup for xdebug');
       return;
     }
@@ -295,10 +353,13 @@ abstract class RoboFileBase extends Tasks {
    * @param bool $reload
    *   Whether to reload the service.
    *
+   * @throws \RuntimeException
+   *   If xdebug cannot be disabled.
+   *
    * @aliases nodebug
    */
   public function devXdebugDisable(bool $reload = TRUE): void {
-    if (!getenv('XDEBUG_CONFIG') && !getenv('XDEBUG_MODE')) {
+    if (!$this->isXdebugConfigured()) {
       $this->say('Environment variables not setup for xdebug');
       return;
     }
@@ -330,6 +391,9 @@ abstract class RoboFileBase extends Tasks {
 
   /**
    * Helper function to check which container type and restart processes.
+   *
+   * Reloads PHP-FPM or Apache to apply xdebug configuration changes.
+   * Uses s6-overlay service control if available, otherwise signals Apache.
    */
   protected function reloadXdebugConfig() {
     // Check if using s6, otherwise its apache2.
@@ -345,33 +409,29 @@ abstract class RoboFileBase extends Tasks {
   /**
    * Replace strings in the services yml.
    *
+   * Updates Twig debug settings, auto-reload, cache, and response headers
+   * in the services.yml file for development vs production configurations.
+   *
    * @param bool $enable
    *   Whether to disable or enable debug parameters.
+   *
+   * @throws \RuntimeException
+   *   If the services.yml file cannot be updated.
    */
   private function devUpdateServices(bool $enable = TRUE): void {
     $replacements = [
-      ['debug: false', 'debug: true'],
-      ['auto_reload: null', 'auto_reload: true'],
-      ['cache: true', 'cache: false'],
-      [
-        'http.response.debug_cacheability_headers: true',
-        'http.response.debug_cacheability_headers: false',
-      ],
+      [self::TWIG_DEBUG_FALSE, self::TWIG_DEBUG_TRUE],
+      [self::TWIG_AUTO_RELOAD_NULL, self::TWIG_AUTO_RELOAD_TRUE],
+      [self::TWIG_CACHE_TRUE, self::TWIG_CACHE_FALSE],
+      [self::HTTP_CACHE_DEBUG_TRUE, self::HTTP_CACHE_DEBUG_FALSE],
     ];
 
-    if ($enable) {
-      $new = 1;
-      $old = 0;
-    }
-    else {
-      $new = 0;
-      $old = 1;
-    }
+    foreach ($replacements as [$production, $debug]) {
+      [$from, $to] = $enable ? [$production, $debug] : [$debug, $production];
 
-    foreach ($replacements as $values) {
       if (!$this->taskReplaceInFile($this->servicesYml)
-        ->from($values[$old])
-        ->to($values[$new])
+        ->from($from)
+        ->to($to)
         ->run()
         ->wasSuccessful()) {
         throw new \RuntimeException('Unable to update services.yml');
@@ -386,7 +446,7 @@ abstract class RoboFileBase extends Tasks {
    *   Whether to clear the cache after changes.
    */
   public function devAggregateAssetsDisable(bool $cacheClear = TRUE): void {
-    $this->preprocessSet(0, $cacheClear);
+    $this->preprocessSet(FALSE, $cacheClear);
   }
 
   /**
@@ -396,18 +456,25 @@ abstract class RoboFileBase extends Tasks {
    *   Whether to clear the cache after changes.
    */
   public function devAggregateAssetsEnable(bool $cacheClear = TRUE): void {
-    $this->preprocessSet(1, $cacheClear);
+    $this->preprocessSet(TRUE, $cacheClear);
   }
 
   /**
    * Helper to actually update files.
    *
-   * @param int $status
-   *   Pass in 0 or 1 for enabled/disabled.
+   * Sets JavaScript and CSS preprocessing (aggregation) on or off.
+   *
+   * @param bool $enable
+   *   TRUE to enable preprocessing, FALSE to disable.
    * @param bool $cacheClear
    *   Whether to clear the cache after changes.
+   *
+   * @throws \RuntimeException
+   *   If config set operations fail.
    */
-  private function preprocessSet(int $status = 1, bool $cacheClear = TRUE) {
+  private function preprocessSet(bool $enable = TRUE, bool $cacheClear = TRUE): void {
+    $status = $enable ? 1 : 0;
+
     $result = $this->drush('config:set')
       ->rawArg("system.performance js.preprocess $status")
       ->option('yes')
@@ -452,19 +519,34 @@ abstract class RoboFileBase extends Tasks {
    * Find the username of user 1 which is the 'admin' user for Drupal.
    *
    * @param string $password
-   *   Password for admin user, defaults to 'password'.
+   *   Password for admin user. Falls back to SITE_ADMIN_PASSWORD config.
+   *
+   * @throws \RuntimeException
+   *   If user 1 cannot be found or password reset fails.
    */
-  public function devResetAdminPass(string $password = 'password'): void {
-    // Retrieve the name of the admin user, it might not be 'admin'.
-    $result = $this->drush('sql:query')
-      ->arg('SELECT name FROM users u LEFT JOIN users_field_data ud ON u.uid = ud.uid WHERE u.uid = 1')
-      ->printOutput(FALSE)
-      ->run();
-    if (!$result->wasSuccessful()) {
-      throw new \RuntimeException('No user with uid 1, this is probably bad.');
+  public function devResetAdminPass(string $password = ''): void {
+    // Use config value if no password provided.
+    if (empty($password)) {
+      $password = $this->config['site']['admin_password'] ?? 'password';
     }
 
-    $adminUser = trim($result->getMessage());
+    // Retrieve the name of the admin user, it might not be 'admin'.
+    $result = $this->drush('user:information')
+      ->arg('1')
+      ->option('format', 'json')
+      ->printOutput(FALSE)
+      ->run();
+
+    if (!$result->wasSuccessful()) {
+      throw new \RuntimeException('Unable to retrieve user 1 information.');
+    }
+
+    $userData = json_decode($result->getMessage(), true);
+    $adminUser = $userData['name'] ?? null;
+
+    if (empty($adminUser)) {
+      throw new \RuntimeException('No user with uid 1, this is probably bad.');
+    }
 
     // Perform the password reset.
     $result = $this->drush('user:password')
@@ -495,7 +577,7 @@ abstract class RoboFileBase extends Tasks {
    *   An optional path to lint.
    */
   public function devLintPhp(string $path = ''): void {
-    $this->_exec('phpcs ' . $path);
+    $this->_exec(trim('phpcs ' . $path));
     $this->_exec('phpstan analyze --no-progress');
   }
 
@@ -506,7 +588,7 @@ abstract class RoboFileBase extends Tasks {
    *   An optional path to fix.
    */
   public function devLintFix(string $path = ''): void {
-    $this->_exec('phpcbf ' . $path);
+    $this->_exec(trim('phpcbf ' . $path));
   }
 
   /**
