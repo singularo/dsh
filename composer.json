@@ -42,8 +42,8 @@
           "path": "assets/docker/xdebug.ini",
           "overwrite": false
         },
-        "[project-root]/docker/custom.ini": {
-          "path": "assets/docker/custom.ini",
+        "[project-root]/docker/developer.ini": {
+          "path": "assets/docker/developer.ini",
           "overwrite": false
         },
         "[project-root]/drush/drush.yml": {
