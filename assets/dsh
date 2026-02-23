@@ -238,7 +238,9 @@ dsh_shell() {
   add_env_if_set() {
     local var=$1 container_var=${2:-$1}
     set +u; local value="${!var:-}"; set -u
-    [ -n "$value" ] && add_env "$container_var" "$value"
+    if [ -n "$value" ]; then
+      options+=("--env ${container_var}=${value}")
+    fi
   }
 
   # Optional testing and monitoring variables.
