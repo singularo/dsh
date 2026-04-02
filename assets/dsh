@@ -84,8 +84,24 @@ if [ -f /.dockerenv ]; then
   exit 1
 fi
 
+# Ensure the shared dsh_network exists. This external network persists across
+# compose up/down cycles, preventing network interface churn that causes
+# ERR_NETWORK_CHANGED in Chromium-based browsers.
+# Must be called before docker compose up, as compose validates external networks.
+#
+# Args:
+#   $1 - Optional "quiet" flag to suppress output messages
+ensure_network() {
+  if ! docker network ls --format "{{.Name}}" --filter "name=^dsh_network$" | grep -q "dsh_network"; then
+    if [ "${1:-}" != "quiet" ]; then
+      notice "Creating dsh_network."
+    fi
+    docker network create dsh_network > /dev/null
+  fi
+}
+
 # Setup and configure the nginx-proxy container for routing traffic to project containers.
-# This function ensures the nginx-proxy container is running and connected to the project network.
+# This function ensures the nginx-proxy container is running and connected to dsh_network.
 #
 # Args:
 #   $1 - Optional "quiet" flag to suppress output messages
@@ -94,18 +110,8 @@ fi
 #   - Routes traffic based on VIRTUAL_HOST environment variables
 #   - Listens on port 8080 for all project URLs
 #   - Automatically discovers containers via docker socket
-#   - Connects to the project's docker network for internal routing
+#   - Connects to dsh_network for internal routing
 setup_nginx() {
-  # Ensure the shared dsh_network exists. This external network persists across
-  # compose up/down cycles, preventing network interface churn that causes
-  # ERR_NETWORK_CHANGED in Chromium-based browsers.
-  if ! docker network ls --format "{{.Name}}" --filter "name=^dsh_network$" | grep -q "dsh_network"; then
-    if [ "${1:-}" != "quiet" ]; then
-      notice "Creating dsh_network."
-    fi
-    docker network create dsh_network > /dev/null
-  fi
-
   # Check if nginx-proxy container exists (running or stopped).
   if docker ps -a --format "{{.Names}}" | grep nginx-proxy > /dev/null; then
     if [ "${1:-}" != "quiet" ]; then
@@ -171,6 +177,8 @@ dsh_start() {
       notice "Starting containers."
     fi
     set -u
+    # Create the external network before compose up, as compose validates it exists.
+    ensure_network "${1:-}"
     if [ "${1:-}" != "quiet" ]; then
       ${DOCKER_COMPOSE} up -d
     else
