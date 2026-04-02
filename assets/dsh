@@ -96,6 +96,16 @@ fi
 #   - Automatically discovers containers via docker socket
 #   - Connects to the project's docker network for internal routing
 setup_nginx() {
+  # Ensure the shared dsh_network exists. This external network persists across
+  # compose up/down cycles, preventing network interface churn that causes
+  # ERR_NETWORK_CHANGED in Chromium-based browsers.
+  if ! docker network ls --format "{{.Name}}" --filter "name=^dsh_network$" | grep -q "dsh_network"; then
+    if [ "${1:-}" != "quiet" ]; then
+      notice "Creating dsh_network."
+    fi
+    docker network create dsh_network > /dev/null
+  fi
+
   # Check if nginx-proxy container exists (running or stopped).
   if docker ps -a --format "{{.Names}}" | grep nginx-proxy > /dev/null; then
     if [ "${1:-}" != "quiet" ]; then
@@ -117,32 +127,28 @@ setup_nginx() {
     error "nginx-proxy could not be started."
   fi
 
-  # Connect nginx-proxy to project network if not already connected.
-  # This allows nginx to route traffic to containers on the project network.
+  # Connect nginx-proxy to dsh_network if not already connected.
+  # This allows nginx to route traffic to containers on the shared network.
   set +e
   URL="http://${PROJECT}.${DOMAIN}:8080"
-  NGINX_IP=$(docker inspect --format "{{with index .NetworkSettings.Networks \"${PROJECT}_default\"}}{{.IPAddress}}{{end}}" nginx-proxy)
+  NGINX_IP=$(docker inspect --format '{{with index .NetworkSettings.Networks "dsh_network"}}{{.IPAddress}}{{end}}' nginx-proxy)
   # Check if we got a valid IP address (nginx is already on the network).
   if [[ ! ${NGINX_IP} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     if [ "${1:-}" != "quiet" ]; then
       notice "Connecting nginx-proxy to the network."
     fi
-    docker network connect "${PROJECT}_default" nginx-proxy > /dev/null
+    docker network connect dsh_network nginx-proxy > /dev/null
   fi
   set -e
 }
 
-# Disconnect nginx-proxy from the project network when stopping.
-# This cleans up the network connection but leaves nginx-proxy running for other projects.
-# The nginx-proxy container itself is not stopped as it may be used by other projects.
+# Handle nginx-proxy on project stop.
+# The shared dsh_network persists - no disconnect needed.
 stop_nginx() {
-  if docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$" > /dev/null; then
-    notice "Disconnecting nginx proxy from network."
-    # Ignore errors if nginx-proxy is already disconnected.
-    set +e
-    docker network disconnect "${PROJECT}_default" nginx-proxy > /dev/null 2>&1
-    set -e
-  fi
+  # Note: We no longer disconnect nginx-proxy from dsh_network on stop.
+  # The shared network persists across all projects and nginx-proxy stays
+  # connected to serve other running projects.
+  notice "Nginx proxy left connected to dsh_network."
 }
 
 # Command: ./dsh start
@@ -171,14 +177,6 @@ dsh_start() {
       ${DOCKER_COMPOSE_QUIET} up -d
     fi
     # Too slow to leave in # ${DOCKER_COMPOSE} build --parallel
-    if [[ ! $(docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$") =~ ${PROJECT}_default ]]; then
-      set +u
-      if [ "${1:-}" != "quiet" ]; then
-        notice "Creating network."
-      fi
-      set -u
-      docker network create "${PROJECT}_default" > /dev/null
-    fi
     setup_nginx "${1:-}"
 
     URL="http://${PROJECT}.${DOMAIN}:8080"
