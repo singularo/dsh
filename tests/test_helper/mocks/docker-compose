@@ -1,0 +1,6 @@
+#!/bin/bash
+# Mock docker-compose command for testing.
+# Logs all calls and returns success.
+
+echo "docker-compose $*" >> "${MOCK_LOG}"
+exit 0

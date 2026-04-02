@@ -1,0 +1,41 @@
+#!/bin/bash
+# Mock docker command for testing.
+# Logs all calls and returns configurable responses.
+
+# Log the call.
+echo "docker $*" >> "${MOCK_LOG}"
+
+case "$1" in
+  ps)
+    if [[ "$*" == *"-a"* ]]; then
+      echo "${MOCK_DOCKER_PS_A}"
+    else
+      echo "${MOCK_DOCKER_PS}"
+    fi
+    ;;
+  network)
+    case "$2" in
+      ls)
+        echo "${MOCK_DOCKER_NETWORK_LS}"
+        ;;
+      create)
+        echo "mock_network_id"
+        ;;
+      connect|disconnect)
+        # Success by default.
+        ;;
+    esac
+    ;;
+  inspect)
+    echo "${MOCK_DOCKER_INSPECT}"
+    ;;
+  run)
+    echo "mock_container_id"
+    ;;
+  restart)
+    ;;
+  *)
+    ;;
+esac
+
+exit 0
