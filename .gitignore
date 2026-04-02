@@ -11,3 +11,7 @@
 /RoboFileBase.php
 /vendor/
 /docker/
+/.env
+/drush/
+/.claude/
+/ai-workflows/

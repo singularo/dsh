@@ -30,3 +30,26 @@ composer require singularo/dsh:^1.0
 ```
 robo build
 ```
+
+## Domain Configuration
+
+By default, dsh uses [nip.io](https://nip.io) for domain resolution. This service provides
+wildcard DNS where any subdomain of `<ip>.nip.io` resolves to that IP address, requiring
+no local configuration.
+
+**Default domains:**
+- **Linux:** `myproject.172.17.0.1.nip.io:8080` (Docker bridge IP)
+- **macOS:** `myproject.127.0.0.1.nip.io:8080`
+
+### Custom Domain
+
+To use your own domain, set the `DOMAIN` environment variable in your `.env` file:
+
+```bash
+DOMAIN=mydomain.test
+```
+
+This allows you to use domains like `myproject.mydomain.test:8080`.
+
+Use the custom DOMAIN if you want to setup your own local dns server with bind,
+dnsmasq or something else.

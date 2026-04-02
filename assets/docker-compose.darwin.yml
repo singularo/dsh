@@ -13,9 +13,8 @@ services:
       CONFIG_SYNC_DIR: ../config/sync
       DATABASE_HOST: db
       DATABASE_USER: drupal
-      DATABASE_PASSWORD: password
-      DRUSH_OPTIONS_URI: http://${PROJECT}.${DOMAIN:-172.17.0.1.nip.io}:8080
-      HASH_SALT: random-hash
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-password}
+      DRUSH_OPTIONS_URI: http://${PROJECT}.${DOMAIN:-127.0.0.1.nip.io}:8080
       MEMCACHE_ENABLED: 0
       MEMCACHE_HOST: memcached
       PHP_IDE_CONFIG: serverName=${PROJECT}.${DOMAIN:-127.0.0.1.nip.io}
@@ -62,8 +61,8 @@ services:
     environment:
       MYSQL_DATABASE: drupal
       MYSQL_USER: drupal
-      MYSQL_PASSWORD: password
-      MYSQL_ROOT_PASSWORD: super-secret-password
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:-password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-super-secret-password}
     networks:
       - default
 
@@ -81,8 +80,13 @@ services:
       - default
 
   selenium:
-    image: selenium/standalone-chrome:106.0
+    image: selenium/standalone-chrome:130.0
     volumes:
       - /dev/shm:/dev/shm
     networks:
       - default
+
+networks:
+  default:
+    external: true
+    name: dsh_network

@@ -99,7 +99,7 @@ class Shepherd {
     $this->filesystem->copy($this->root . '/sites/default/default.settings.php', $this->settings);
 
     // If we haven't already written to settings.php.
-    if (!(strpos(file_get_contents($this->settings), 'START SHEPHERD CONFIG') !== FALSE)) {
+    if (!str_contains(file_get_contents($this->settings), 'START SHEPHERD CONFIG')) {
       // Append Shepherd-specific environment variable settings to settings.php.
       file_put_contents(
         $this->settings,
@@ -130,7 +130,7 @@ class Shepherd {
   /**
    * Ensure that the config sync directory exists and is writable.
    */
-  public function ensureConfigSync($io): void {
+  public function ensureConfigSync(IOInterface $io): void {
     if (!$config_sync_dir = getenv('CONFIG_SYNC_DIR')) {
       $config_sync_dir = "config/sync";
     }
@@ -146,7 +146,7 @@ class Shepherd {
   /**
    * Ensure that the shared/files directories exists and are writable.
    */
-  public function ensureShared($io): void {
+  public function ensureShared(IOInterface $io): void {
     $io->write('Ensuring shared filesystem folder exists.');
 
     $this->filesystem->mkdir([
@@ -161,7 +161,7 @@ class Shepherd {
   /**
    * Ensure that the scripts are executable.
    */
-  public function makeExecutable($io): void {
+  public function makeExecutable(IOInterface $io): void {
     $io->write('Ensuring dsh utility scripts are executable.');
 
     $this->checkExistsSetPerm([

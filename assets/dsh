@@ -6,7 +6,7 @@
 # development environment.
 #
 
-# `set +e` is used to continue on errors throughout this script.
+# Exit on errors, undefined variables, and pipe failures.
 set -euo pipefail
 
 # Project is used as the prefix for docker networking, container naming and nginx hostname.
@@ -27,6 +27,9 @@ DOCKER_COMPOSE_QUIET="docker-compose --ansi never --progress quiet"
 SHELL_CONTAINER=web
 
 # Set domain default if its not set.
+# Default uses nip.io which provides wildcard DNS without any local configuration.
+# Any subdomain of <ip>.nip.io resolves to that IP address.
+# Custom domains can be set via DOMAIN environment variable in .env.
 set +u
 if [[ "${HOST_TYPE}" =~ 'darwin' ]]; then
   if [ -z "${DOMAIN}" ]; then
@@ -65,7 +68,7 @@ if [ ! -f "${COMPOSE_FILE}" ]; then
     COMPOSE_FILE='docker-compose.yml'
   else
     error "Unable to locate ${COMPOSE_FILE} in current directory."
-    exit
+    exit 1
   fi
 fi
 
@@ -78,12 +81,32 @@ export COMPOSE_FILE
 # Ensure script is NOT running inside a container - must be run from host.
 if [ -f /.dockerenv ]; then
   error "Inception error - you can't run $0 within a docker container."
-  exit
+  exit 1
 fi
 
-# Add functionality to the dsh setup/start function
+# Setup and configure the nginx-proxy container for routing traffic to project containers.
+# This function ensures the nginx-proxy container is running and connected to the project network.
+#
+# Args:
+#   $1 - Optional "quiet" flag to suppress output messages
+#
+# The nginx-proxy container:
+#   - Routes traffic based on VIRTUAL_HOST environment variables
+#   - Listens on port 8080 for all project URLs
+#   - Automatically discovers containers via docker socket
+#   - Connects to the project's docker network for internal routing
 setup_nginx() {
-  # Check if its running/exists already and start if required.
+  # Ensure the shared dsh_network exists. This external network persists across
+  # compose up/down cycles, preventing network interface churn that causes
+  # ERR_NETWORK_CHANGED in Chromium-based browsers.
+  if ! docker network ls --format "{{.Name}}" --filter "name=^dsh_network$" | grep -q "dsh_network"; then
+    if [ "${1:-}" != "quiet" ]; then
+      notice "Creating dsh_network."
+    fi
+    docker network create dsh_network > /dev/null
+  fi
+
+  # Check if nginx-proxy container exists (running or stopped).
   if docker ps -a --format "{{.Names}}" | grep nginx-proxy > /dev/null; then
     if [ "${1:-}" != "quiet" ]; then
       warning "Restarting nginx proxy"
@@ -100,35 +123,48 @@ setup_nginx() {
       nginxproxy/nginx-proxy:1.3.1 > /dev/null
   fi
 
-  if ! docker ps --format "{{.Names}}" --filter "name=^nginx-proxy$" > /dev/null; then
-    error "jwilder/nginx-proxy could not be started."
+  if ! docker ps --format "{{.Names}}" --filter "name=^nginx-proxy$" | grep -q "nginx-proxy"; then
+    error "nginx-proxy could not be started."
   fi
 
+  # Connect nginx-proxy to dsh_network if not already connected.
+  # This allows nginx to route traffic to containers on the shared network.
   set +e
   URL="http://${PROJECT}.${DOMAIN}:8080"
-  NGINX_IP=$(docker inspect --format "{{with index .NetworkSettings.Networks \"${PROJECT}_default\"}}{{.IPAddress}}{{end}}" nginx-proxy)
+  NGINX_IP=$(docker inspect --format '{{with index .NetworkSettings.Networks "dsh_network"}}{{.IPAddress}}{{end}}' nginx-proxy)
+  # Check if we got a valid IP address (nginx is already on the network).
   if [[ ! ${NGINX_IP} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     if [ "${1:-}" != "quiet" ]; then
       notice "Connecting nginx-proxy to the network."
     fi
-    docker network connect "${PROJECT}_default" nginx-proxy > /dev/null
+    docker network connect dsh_network nginx-proxy > /dev/null
   fi
   set -e
 }
 
-# Add functionality to the dsh stop function
+# Handle nginx-proxy on project stop.
+# The shared dsh_network persists - no disconnect needed.
 stop_nginx() {
-  if docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$" > /dev/null; then
-    notice "Disconnecting nginx proxy from network."
-    set +e
-    docker network disconnect "${PROJECT}_default" nginx-proxy > /dev/null 2>&1
-    set -e
-  fi
+  # Note: We no longer disconnect nginx-proxy from dsh_network on stop.
+  # The shared network persists across all projects and nginx-proxy stays
+  # connected to serve other running projects.
+  notice "Nginx proxy left connected to dsh_network."
 }
 
 # Command: ./dsh start
-# Configures environment then brings up project using docker-compose.yml file.
+# Start all project containers, create network if needed, and setup nginx-proxy routing.
+#
+# Args:
+#   $1 - Optional "quiet" flag to suppress output messages
+#
+# This function:
+#   1. Checks if containers are already running (skips if already started)
+#   2. Starts all services defined in docker-compose file
+#   3. Creates docker network if it doesn't exist
+#   4. Configures nginx-proxy for HTTP routing
+#   5. Displays the project URL when complete
 dsh_start() {
+  # Check if web container is already running.
   if [[ ! $(docker ps --format "{{.Names}}" --filter "name=^${PROJECT}_web") =~ ${PROJECT}_web ]]; then
     set +u
     if [ "${1:-}" != "quiet" ]; then
@@ -141,14 +177,6 @@ dsh_start() {
       ${DOCKER_COMPOSE_QUIET} up -d
     fi
     # Too slow to leave in # ${DOCKER_COMPOSE} build --parallel
-    if [[ ! $(docker network ls --format "{{.Name}}" --filter "name=^${PROJECT}_default\$") =~ ${PROJECT}_default ]]; then
-      set +u
-      if [ "${1:-}" != "quiet" ]; then
-        notice "Creating network."
-      fi
-      set -u
-      docker network create "${PROJECT}_default" > /dev/null
-    fi
     setup_nginx "${1:-}"
 
     URL="http://${PROJECT}.${DOMAIN}:8080"
@@ -163,79 +191,79 @@ Files are available in /code, You may need to 'robo build' to install."
 }
 
 # Command: ./dsh shell
-# Connects a shell to the web image as the current user.
+# Connect to the web container as the current user for running commands or interactive shell.
+#
+# Usage:
+#   ./dsh shell                    - Opens interactive bash shell
+#   ./dsh shell "command"          - Runs command in container
+#   ./dsh shell "command" | grep   - Runs command without TTY (for piping)
+#
+# This function:
+#   1. Ensures containers are started (quietly if running a command)
+#   2. Creates a user in the container matching your local user ID (prevents permission issues)
+#   3. Passes through environment variables needed for testing and development
+#   4. Handles both interactive shells and command execution
+#   5. Detects if output is piped and adjusts TTY allocation accordingly
 dsh_shell() {
-  # Check if we're running a command (not interactive shell)
+  # Start containers quietly if running a command, with output if interactive.
   if [ $# -gt 0 ]; then
     dsh_start quiet
   else
     dsh_start
   fi
 
-  # Setup docker to run the shell as the current user, thus removing any
-  # permission issues.
-  EXISTING_USER=$(${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u www-data | sed -e 's/\r//g')
+  # Setup a user in the container matching the host user ID to avoid permission issues.
+  # Check if www-data user ID matches our local user ID.
+  EXISTING_USER=$(${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u www-data 2>/dev/null | sed -e 's/\r//g' || echo "")
   if [ "${EXISTING_USER}" != "${USER_ID}" ]; then
+    # www-data doesn't match, check if our user already exists in container.
     if ! ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} id -u "${USER}" >/dev/null 2>&1; then
       notice "Setting up user $USER on web container."
-      # Add user with local $USER name to container.
-      ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} adduser --disabled-password --uid ${UID} \
+      # Create user with matching UID and grant sudo access.
+      ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} adduser --disabled-password --uid "${USER_ID}" \
         --gecos "${USER}" --home "/home/${USER}" "${USER}" >/dev/null
-      # Allow sudo without password for user.
       ${DOCKER_COMPOSE} exec ${SHELL_CONTAINER} /bin/bash -c "echo '${USER} ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/${USER}" > /dev/null
     fi
   else
+    # www-data UID matches, use www-data user.
     USER=www-data
   fi
 
-  # Build an array of options to pass to the container.
-  set +u
+  # Build array of environment variables to pass to the container.
   options=()
-  if [ -n "${DTT_BASE_URL}" ]; then
-    options+=("--env DTT_BASE_URL=${DTT_BASE_URL}")
-  fi
 
-  if [ -n "${DTT_MINK_DRIVER_ARGS}" ]; then
-    options+=("--env DTT_MINK_DRIVER_ARGS=${DTT_MINK_DRIVER_ARGS}")
-  fi
+  # Helper: add env var only if set on host.
+  add_env_if_set() {
+    local var=$1 container_var=${2:-$1}
+    set +u; local value="${!var:-}"; set -u
+    if [ -n "$value" ]; then
+      options+=("--env ${container_var}=${value}")
+    fi
+  }
 
-  if [ -n "${SIMPLETEST_BASE_URL}" ]; then
-    options+=("--env SIMPLETEST_BASE_URL=${SIMPLETEST_BASE_URL}")
-  fi
+  # Optional testing and monitoring variables.
+  add_env_if_set DTT_BASE_URL
+  add_env_if_set DTT_MINK_DRIVER_ARGS
+  add_env_if_set SIMPLETEST_BASE_URL
+  add_env_if_set SIMPLETEST_DB
+  add_env_if_set NEWRELIC_ENABLED
+  add_env_if_set NEWRELIC_APP
+  add_env_if_set NEWRELIC_LICENSE
+  add_env_if_set CONTAINER_SSH_AUTH_SOCK SSH_AUTH_SOCK
 
-  if [ -n "${SIMPLETEST_DB}" ]; then
-    options+=("--env SIMPLETEST_DB=${SIMPLETEST_DB}")
-  fi
-
-  if [ -n "${NEWRELIC_ENABLED}" ]; then
-    options+=("--env NEWRELIC_ENABLED=${NEWRELIC_ENABLED}")
-  fi
-
-  if [ -n "${NEWRELIC_APP}" ]; then
-    options+=("--env NEWRELIC_APP=${NEWRELIC_APP}")
-  fi
-
-  if [ -n "${NEWRELIC_LICENSE}" ]; then
-    options+=("--env NEWRELIC_LICENSE=${NEWRELIC_LICENSE}")
-  fi
-
-  if [ -n "${CONTAINER_SSH_AUTH_SOCK}" ]; then
-    options+=("--env SSH_AUTH_SOCK=${CONTAINER_SSH_AUTH_SOCK}")
-  fi
-  set -u
-
-  # These things should always be present.
+  # Required variables.
   options+=("--env PROJECT=${PROJECT}")
   options+=("--env DOMAIN=${DOMAIN}")
   options+=("--env COLUMNS=$(tput cols)")
   options+=("--env LINES=$(tput lines)")
   options+=("--env TERM=${TERM:-xterm}")
 
-  # Handle command execution
+  # Execute command or start interactive shell.
   if [ $# -gt 0 ]; then
-    # Check if we're in a pipeline (output being captured)
+    # Running a command (not interactive shell).
+    # Check if stdout is a terminal (TTY) or being piped/redirected.
     if [ ! -t 1 ]; then
-      # Output is being piped/redirected, don't allocate TTY
+      # Output is being piped/redirected, don't allocate TTY.
       ${DOCKER_COMPOSE} exec \
         -u "${USER}" \
         ${options[@]} \
@@ -275,25 +303,34 @@ dsh_down() {
 }
 
 # Command: ./dsh purge
-# Stops project, then takes down containers, removes volumes and remove dev image.
+# Complete cleanup: stops containers, removes volumes, networks, and deletes all Docker images.
+#
+# WARNING: This is destructive and removes all data and images for this project.
+#
+# This function:
+#   1. Runs dsh_down to stop and remove containers/volumes
+#   2. Extracts image names from docker-compose files
+#   3. Forcefully removes all Docker images used by the project
+#   4. Useful for complete cleanup or troubleshooting image issues
 dsh_purge() {
   dsh_down
 
-  # Get the image lines from the compose files.
+  # Extract all image names from the compose file(s).
   # shellcheck disable=SC2086
   RESULTS=$(grep -h 'image:' ${COMPOSE_FILE//:/ })
 
-  # Set the field separator, then convert the results to an array.
+  # Convert grep results into an array of lines.
   LINES=()
   while IFS= read -r line; do
     LINES+=("$line")
   done <<< "$RESULTS"
 
-  # Loop through the array and delete the images.
+  # Remove each Docker image referenced in the compose files.
   for LINE in "${LINES[@]}"
   do
-    # Remove the parts of the line we don't need.
+    # Extract image name by removing "image: " prefix.
     IMAGE=${LINE#*image: }
+    # Force remove image, ignore errors if already removed.
     docker rmi -f "${IMAGE}" > /dev/null 2>&1
   done
 }
@@ -314,7 +351,8 @@ dsh_logs() {
 # Fetches all images used by the project.
 dsh_pull() {
   # docker-compose doesn't resolve sub-dependencies in Dockerfiles.
-  docker pull singularo/s2i-shepherd-drupal > /dev/null
+  BASE_IMAGE=${BASE_IMAGE:-singularo/s2i-shepherd-drupal}
+  docker pull "${BASE_IMAGE}" > /dev/null
   ${DOCKER_COMPOSE_QUIET} pull --ignore-pull-failures
   ${DOCKER_COMPOSE_QUIET} build
 }
