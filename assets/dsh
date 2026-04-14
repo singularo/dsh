@@ -84,20 +84,28 @@ if [ -f /.dockerenv ]; then
   exit 1
 fi
 
-# Ensure the shared dsh_network exists. This external network persists across
+# Ensure persistent external networks exist. Both networks persist across
 # compose up/down cycles, preventing network interface churn that causes
 # ERR_NETWORK_CHANGED in Chromium-based browsers.
+#
+# Two networks are created:
+#   - dsh_network: Shared across all projects for nginx-proxy routing.
+#   - dsh_${PROJECT}: Per-project network isolating backend services (db,
+#     proxysql, memcached, redis) so hostnames don't collide.
+#
 # Must be called before docker compose up, as compose validates external networks.
 #
 # Args:
 #   $1 - Optional "quiet" flag to suppress output messages
 ensure_network() {
-  if ! docker network ls --format "{{.Name}}" --filter "name=^dsh_network$" | grep -q "dsh_network"; then
-    if [ "${1:-}" != "quiet" ]; then
-      notice "Creating dsh_network."
+  for net in dsh_network "dsh_${PROJECT}"; do
+    if ! docker network ls --format "{{.Name}}" --filter "name=^${net}$" | grep -q "^${net}$"; then
+      if [ "${1:-}" != "quiet" ]; then
+        notice "Creating ${net}."
+      fi
+      docker network create "${net}" > /dev/null
     fi
-    docker network create dsh_network > /dev/null
-  fi
+  done
 }
 
 # Setup and configure the nginx-proxy container for routing traffic to project containers.
