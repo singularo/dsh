@@ -54,13 +54,8 @@ services:
       - ./shared/public:/code/web/sites/default/files
       - ${SSH_AUTH_SOCK}:/ssh/ssh
     networks:
-      - default
-    # Map host.docker.internal to the Docker bridge IP on Linux.
-    # This hostname is automatically available on macOS & Windows but not on Linux.
-    # Adding it here provides a consistent hostname across platforms for accessing
-    # host services (like xdebug, SSH agent, etc.) until Docker provides native support.
-    extra_hosts:
-      - "host.docker.internal:172.17.0.1"
+      - internal
+      - proxy
 
   db:
     image: mariadb
@@ -70,7 +65,7 @@ services:
       MYSQL_PASSWORD: ${DATABASE_PASSWORD:-password}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-super-secret-password}
     networks:
-      - default
+      - internal
 
   mail:
     image: axllent/mailpit
@@ -78,21 +73,24 @@ services:
       VIRTUAL_HOST: mail.${PROJECT}.${DOMAIN:-172.17.0.1.nip.io}
       VIRTUAL_PORT: 8025
     networks:
-      - default
+      - internal
 
   memcached:
     image: memcached:alpine
     networks:
-      - default
+      - internal
 
   selenium:
     image: selenium/standalone-chrome:130.0
     volumes:
       - /dev/shm:/dev/shm
     networks:
-      - default
+      - internal
 
 networks:
-  default:
+  internal:
+    external: true
+    name: dsh_${PROJECT}
+  proxy:
     external: true
     name: dsh_network
