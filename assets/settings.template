@@ -53,13 +53,45 @@ if (getenv('REDIS_ENABLED')) {
   $settings['cache']['bins']['config'] = 'cache.backend.chainedfast';
 
   $settings['cache_prefix']['default'] = getenv('REDIS_PREFIX') ?: '';
-  // If we're not installing, include the redis services.
-  if (!isset($GLOBALS['install_state'])) {
-    $settings['cache']['default'] = 'cache.backend.redis';
-    $settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
-  }
+  // Compress cache entries over 1000 bytes to reduce memory usage.
+  $settings['redis_compress_length'] = 1000;
+  // Retrieve redis password from a file if required.
   if (getenv('REDIS_PASSWORD_FILE') || getenv('REDIS_PASSWORD')) {
     $settings['redis.connection']['password'] = getenv('REDIS_PASSWORD_FILE') ? file_get_contents(getenv('REDIS_PASSWORD_FILE')) : getenv('REDIS_PASSWORD');
+  }
+  // If we're not installing, include the redis services.
+  if (!\Drupal\Core\Installer\InstallerKernel::installationAttempted()) {
+    $settings['cache']['default'] = 'cache.backend.redis';
+    $settings['container_yamls'][] = 'modules/contrib/redis/redis.services.yml';
+    $settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
+    // Use Redis for the container cache to avoid SQL on every request.
+    // Kept inside the install guard to prevent polluting the shared Redis
+    // instance with stale container data during Drupal functional test installs.
+    $class_loader->addPsr4('Drupal\\redis\\', 'modules/contrib/redis/src');
+    $settings['bootstrap_container_definition'] = [
+      'parameters' => [],
+      'services' => [
+        'redis.factory' => [
+          'class' => 'Drupal\redis\ClientFactory',
+        ],
+        'cache.backend.redis' => [
+          'class' => 'Drupal\redis\Cache\CacheBackendFactory',
+          'arguments' => ['@redis.factory', '@cache_tags_provider.container', '@serialization.phpserialize'],
+        ],
+        'cache.container' => [
+          'class' => '\Drupal\redis\Cache\PhpRedis',
+          'factory' => ['@cache.backend.redis', 'get'],
+          'arguments' => ['container'],
+        ],
+        'cache_tags_provider.container' => [
+          'class' => 'Drupal\redis\Cache\RedisCacheTagsChecksum',
+          'arguments' => ['@redis.factory'],
+        ],
+        'serialization.phpserialize' => [
+          'class' => 'Drupal\Component\Serialization\PhpSerialize',
+        ],
+      ],
+    ];
   }
 }
 if (getenv('MEMCACHE_ENABLED')) {
@@ -69,7 +101,7 @@ if (getenv('MEMCACHE_ENABLED')) {
   $settings['memcache']['bins'] = ['default' => 'default'];
   $settings['memcache']['key_prefix'] = getenv('MEMCACHE_PREFIX') ?: '';
   // If we're not installing, include the memcache services.
-  if (!isset($GLOBALS['install_state'])) {
+  if (!\Drupal\Core\Installer\InstallerKernel::installationAttempted()) {
     $settings['cache']['default'] = 'cache.backend.memcache';
   }
 }
