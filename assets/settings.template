@@ -53,8 +53,8 @@ if (getenv('REDIS_ENABLED')) {
   $settings['cache']['bins']['config'] = 'cache.backend.chainedfast';
 
   $settings['cache_prefix']['default'] = getenv('REDIS_PREFIX') ?: '';
-  // Compress cache entries over 1000 bytes to reduce memory usage.
-  $settings['redis_compress_length'] = 1000;
+  // Compress cache entries over 100 bytes to reduce memory usage.
+  $settings['redis_compress_length'] = 100;
   // Retrieve redis password from a file if required.
   if (getenv('REDIS_PASSWORD_FILE') || getenv('REDIS_PASSWORD')) {
     $settings['redis.connection']['password'] = getenv('REDIS_PASSWORD_FILE') ? file_get_contents(getenv('REDIS_PASSWORD_FILE')) : getenv('REDIS_PASSWORD');
