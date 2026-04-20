@@ -88,19 +88,16 @@ class Shepherd {
   }
 
   /**
-   * Create settings.php file and inject Shepherd-specific settings.
-   *
-   * Note: does nothing if the file already exists.
+   * Re-generate settings.php file and inject Shepherd-specific settings.
    *
    * @throws \Exception
    */
   public function populateSettingsFile(): void {
     // Always re-create the settings.php file. Custom config goes elsewhere.
-    $this->filesystem->copy($this->root . '/sites/default/default.settings.php', $this->settings);
+    $this->filesystem->copy($this->root . '/sites/default/default.settings.php', $this->settings, TRUE);
 
-    // If we haven't already written to settings.php.
+    // Now write Shepherd-specific settings into the file.
     if (!str_contains(file_get_contents($this->settings), 'START SHEPHERD CONFIG')) {
-      // Append Shepherd-specific environment variable settings to settings.php.
       file_put_contents(
         $this->settings,
         $this->generateSettings(),
