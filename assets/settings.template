@@ -59,6 +59,7 @@ if (getenv('REDIS_ENABLED')) {
   if (getenv('REDIS_PASSWORD_FILE') || getenv('REDIS_PASSWORD')) {
     $settings['redis.connection']['password'] = getenv('REDIS_PASSWORD_FILE') ? file_get_contents(getenv('REDIS_PASSWORD_FILE')) : getenv('REDIS_PASSWORD');
   }
+  $settings['redis.connection']['persistent'] = TRUE;
   // If we're not installing, include the redis services.
   if (!\Drupal\Core\Installer\InstallerKernel::installationAttempted()) {
     $settings['cache']['default'] = 'cache.backend.redis';
