@@ -532,7 +532,7 @@ abstract class RoboFileBase extends Tasks {
 
     // Retrieve the name of the admin user, it might not be 'admin'.
     $result = $this->drush('user:information')
-      ->arg('1')
+      ->option('uid', '1')
       ->option('format', 'json')
       ->printOutput(FALSE)
       ->run();
@@ -541,7 +541,9 @@ abstract class RoboFileBase extends Tasks {
       throw new \RuntimeException('Unable to retrieve user 1 information.');
     }
 
-    $userData = json_decode($result->getMessage(), true);
+    $userData = json_decode($result->getMessage(), TRUE);
+    // The JSON response is keyed by UID: {"1": {"name": "...", ...}}.
+    $userData = reset($userData) ?: [];
     $adminUser = $userData['name'] ?? null;
 
     if (empty($adminUser)) {
