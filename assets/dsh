@@ -156,6 +156,43 @@ setup_nginx() {
   set -e
 }
 
+# Run an optional post-up hook after the stack is up, before the shell.
+# Lets a project run arbitrary local setup once containers are running -
+# e.g. bringing up the shared Selenium pool on Linux. The hook is opt-in:
+# it runs only if the resolved script exists and is executable, so checkouts
+# without one are unaffected.
+#
+# The hook receives PROJECT, DOMAIN, HOST_TYPE and DSH_QUIET in its
+# environment. A failing hook is warned about but never aborts the shell.
+#
+# Args:
+#   $1 - Optional "quiet" flag, forwarded to the hook as DSH_QUIET=1.
+run_post_up_hook() {
+  [ -x ./dsh-post-up.sh ] || return 0
+  if [ "${1:-}" != "quiet" ]; then
+    notice "Running post-up hook: ./dsh-post-up.sh"
+  fi
+  local quiet=0
+  [ "${1:-}" = "quiet" ] && quiet=1
+  PROJECT="${PROJECT}" DOMAIN="${DOMAIN}" HOST_TYPE="${HOST_TYPE}" \
+    DSH_QUIET="${quiet}" ./dsh-post-up.sh \
+    || warning "post-up hook failed (continuing): ./dsh-post-up.sh"
+}
+
+# Run an optional post-down hook after this project's containers have been
+# stopped/removed. Mirror of run_post_up_hook: lets a project tear down
+# shared services it no longer needs - e.g. the shared Selenium pool, but
+# only when no other dsh stack still requires it (the hook decides). Opt-in:
+# runs only if the resolved script exists and is executable.
+#
+# The hook receives PROJECT, DOMAIN and HOST_TYPE in its environment.
+# A failing hook is warned about but never aborts the command.
+run_post_down_hook() {
+  [ -x ./dsh-post-down.sh ] || return 0
+  PROJECT="${PROJECT}" DOMAIN="${DOMAIN}" HOST_TYPE="${HOST_TYPE}" \
+    ./dsh-post-down.sh || warning "post-down hook failed (continuing): ./dsh-post-down.sh"
+}
+
 # Handle nginx-proxy on project stop.
 # The shared dsh_network persists - no disconnect needed.
 stop_nginx() {
@@ -172,28 +209,30 @@ stop_nginx() {
 #   $1 - Optional "quiet" flag to suppress output messages
 #
 # This function:
-#   1. Checks if containers are already running (skips if already started)
-#   2. Starts all services defined in docker-compose file
-#   3. Creates docker network if it doesn't exist
-#   4. Configures nginx-proxy for HTTP routing
-#   5. Displays the project URL when complete
+#   1. Ensures external networks exist (idempotent; recreates if lost while web container stayed up)
+#   2. Starts all services defined in docker-compose file (skipped if already running)
+#   3. Displays the project URL when containers are freshly started
+#   4. Configures nginx-proxy for HTTP routing (always, to restore after shared-resource loss)
+#   5. Runs the optional post-up hook (always, for the same reason)
 dsh_start() {
-  # Check if web container is already running.
+  # Ensure external networks exist. Idempotent; safe to call even when containers are
+  # already running, because shared networks may have been removed while the web container
+  # remained up. Must run before compose up, which validates external networks.
+  ensure_network "${1:-}"
+
+  # Start containers only if the web container is not already running.
   if [[ ! $(docker ps --format "{{.Names}}" --filter "name=^${PROJECT}_web") =~ ${PROJECT}_web ]]; then
     set +u
     if [ "${1:-}" != "quiet" ]; then
       notice "Starting containers."
     fi
     set -u
-    # Create the external network before compose up, as compose validates it exists.
-    ensure_network "${1:-}"
+    # Too slow to leave in # ${DOCKER_COMPOSE} build --parallel
     if [ "${1:-}" != "quiet" ]; then
       ${DOCKER_COMPOSE} up -d
     else
       ${DOCKER_COMPOSE_QUIET} up -d
     fi
-    # Too slow to leave in # ${DOCKER_COMPOSE} build --parallel
-    setup_nginx "${1:-}"
 
     URL="http://${PROJECT}.${DOMAIN}:8080"
     set +u
@@ -204,6 +243,12 @@ Files are available in /code, You may need to 'robo build' to install."
     fi
     set -u
   fi
+
+  # Always (re)configure nginx and run the post-up hook. Both are idempotent, so
+  # this is safe when the web container was already running but shared resources
+  # (nginx-proxy, dsh_network connection) were lost or need restoring.
+  setup_nginx "${1:-}"
+  run_post_up_hook "${1:-}"
 }
 
 # Command: ./dsh shell
@@ -308,6 +353,8 @@ dsh_stop() {
   notice "Stopping containers."
   stop_nginx
   ${DOCKER_COMPOSE_QUIET} stop
+  # Tear down shared services (e.g. the Selenium pool) if no stack needs them.
+  run_post_down_hook
 }
 
 # Command: ./dsh down
@@ -316,6 +363,8 @@ dsh_down() {
   stop_nginx
   notice "Removing containers."
   ${DOCKER_COMPOSE_QUIET} down -v
+  # Tear down shared services (e.g. the Selenium pool) if no stack needs them.
+  run_post_down_hook
 }
 
 # Command: ./dsh purge
