@@ -120,7 +120,20 @@ ensure_network() {
 #   - Automatically discovers containers via docker socket
 #   - Connects to dsh_network for internal routing
 setup_nginx() {
-  # Check if nginx-proxy container exists (running or stopped).
+  # Check if nginx-proxy is already running and connected to dsh_network.
+  # If so, there is nothing to do - skip the restart to avoid a brief HTTP
+  # outage across all running project sites.
+  set +e
+  NGINX_IP=$(docker inspect --format \
+    '{{with index .NetworkSettings.Networks "dsh_network"}}{{.IPAddress}}{{end}}' \
+    nginx-proxy 2>/dev/null)
+  set -e
+  if [[ ${NGINX_IP} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    # Already running and connected - nothing to do.
+    return 0
+  fi
+
+  # nginx-proxy is either missing, stopped, or not yet on dsh_network.
   if docker ps -a --format "{{.Names}}" | grep nginx-proxy > /dev/null; then
     if [ "${1:-}" != "quiet" ]; then
       warning "Restarting nginx proxy"
@@ -142,11 +155,10 @@ setup_nginx() {
   fi
 
   # Connect nginx-proxy to dsh_network if not already connected.
-  # This allows nginx to route traffic to containers on the shared network.
   set +e
-  URL="http://${PROJECT}.${DOMAIN}:8080"
-  NGINX_IP=$(docker inspect --format '{{with index .NetworkSettings.Networks "dsh_network"}}{{.IPAddress}}{{end}}' nginx-proxy)
-  # Check if we got a valid IP address (nginx is already on the network).
+  NGINX_IP=$(docker inspect --format \
+    '{{with index .NetworkSettings.Networks "dsh_network"}}{{.IPAddress}}{{end}}' \
+    nginx-proxy)
   if [[ ! ${NGINX_IP} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     if [ "${1:-}" != "quiet" ]; then
       notice "Connecting nginx-proxy to the network."
