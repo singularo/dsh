@@ -438,8 +438,9 @@ dsh_build() {
 # Command: ./dsh pull
 # Fetches all images used by the project.
 dsh_pull() {
-  # docker-compose doesn't resolve sub-dependencies in Dockerfiles.
-  BASE_IMAGE=${BASE_IMAGE:-singularo/s2i-shepherd-drupal}
+  # docker-compose doesn't resolve sub-dependencies in Dockerfiles, so pull
+  # the image the project's Dockerfile builds from.
+  BASE_IMAGE=${BASE_IMAGE:-$(awk 'toupper($1) == "FROM" { print $2; exit }' docker/Dockerfile)}
   docker pull "${BASE_IMAGE}" > /dev/null
   ${DOCKER_COMPOSE_QUIET} pull --ignore-pull-failures
   ${DOCKER_COMPOSE_QUIET} build
