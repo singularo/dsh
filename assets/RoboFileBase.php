@@ -139,14 +139,14 @@ abstract class RoboFileBase extends Tasks {
   protected function readConfigFromEnv(): array {
     $config = [
       'site' => [
-        'title' => getenv('SITE_TITLE'),
-        'mail' => getenv('SITE_MAIL'),
-        'admin_email' => getenv('SITE_ADMIN_EMAIL'),
-        'admin_user' => getenv('SITE_ADMIN_USERNAME'),
-        'admin_password' => getenv('SITE_ADMIN_PASSWORD'),
+        'title' => $this->environmentValue('SITE_TITLE'),
+        'mail' => $this->environmentValue('SITE_MAIL'),
+        'admin_email' => $this->environmentValue('SITE_ADMIN_EMAIL'),
+        'admin_user' => $this->environmentValue('SITE_ADMIN_USERNAME'),
+        'admin_password' => $this->environmentValue('SITE_ADMIN_PASSWORD'),
       ],
       'environment' => [
-        'hash_salt' => getenv('HASH_SALT'),
+        'hash_salt' => $this->environmentValue('HASH_SALT'),
       ],
     ];
 
@@ -165,6 +165,21 @@ abstract class RoboFileBase extends Tasks {
     $arrayClean($config);
 
     return $config;
+  }
+
+  /**
+   * Reads an environment value or its Docker secret file.
+   */
+  protected function environmentValue(string $name): string|false {
+    $file = getenv($name . '_FILE');
+    if ($file === FALSE || $file === '') {
+      return getenv($name);
+    }
+    $value = @file_get_contents($file);
+    if ($value === FALSE) {
+      throw new \RuntimeException("Unable to read $name from its secret file.");
+    }
+    return $value;
   }
 
   /**
