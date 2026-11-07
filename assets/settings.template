@@ -68,7 +68,7 @@ if (getenv('REDIS_ENABLED')) {
     // Use Redis for the container cache to avoid SQL on every request.
     // Kept inside the install guard to prevent polluting the shared Redis
     // instance with stale container data during Drupal functional test installs.
-    $class_loader->addPsr4('Drupal\\redis\\', 'modules/contrib/redis/src');
+    $class_loader->addPsr4('Drupal\\redis\\', $app_root . '/modules/contrib/redis/src');
     $settings['bootstrap_container_definition'] = [
       'parameters' => [],
       'services' => [
