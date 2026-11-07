@@ -26,6 +26,11 @@ DOCKER_COMPOSE="docker-compose --ansi never"
 DOCKER_COMPOSE_QUIET="docker-compose --ansi never --progress quiet"
 SHELL_CONTAINER=web
 
+# Local development builds must use Docker's daemon-backed builder so they can
+# consume locally tagged base images. Permit an explicit override when needed.
+BUILDX_BUILDER=${BUILDX_BUILDER:-default}
+export BUILDX_BUILDER
+
 # Set domain default if its not set.
 # Default uses nip.io which provides wildcard DNS without any local configuration.
 # Any subdomain of <ip>.nip.io resolves to that IP address.
