@@ -429,6 +429,12 @@ dsh_logs() {
   ${DOCKER_COMPOSE} logs -n 100 -f web
 }
 
+# Command: ./dsh build
+# Build the project images without changing the state of running containers.
+dsh_build() {
+  ${DOCKER_COMPOSE_QUIET} build
+}
+
 # Command: ./dsh pull
 # Fetches all images used by the project.
 dsh_pull() {
@@ -442,6 +448,7 @@ dsh_pull() {
 dsh_help() {
   printf "\nUsage: dsh [COMMAND] [ARGS...]\n
 Commands:
+\t build\tBuild the project images.
 \t down\tShutdown and destroy the containers.
 \t help\tShow this help.
 \t logs\tShow the container logs with tail -f - ctrl-c to exit.
@@ -460,6 +467,9 @@ Any other arguments will be executed as a command in the container.\n\n"
 COMMAND=${1:-default}
 
 case ${COMMAND} in
+  bu*)
+    dsh_build
+    ;;
   dow*)
     dsh_down
     ;;
