@@ -41,12 +41,12 @@ RUN apt-get update \
 RUN wget -q https://getcomposer.org/installer -O - | php -d allow_url_fopen=On -- --install-dir=/usr/local/bin --filename=composer
 
 COPY ./docker/xdebug.ini /etc/php/${PHP_VERSION}/mods-available/xdebug.ini
-COPY ./docker/custom.ini /etc/php/${PHP_VERSION}/mods-available/custom.ini
+COPY ./docker/developer.ini /etc/php/${PHP_VERSION}/mods-available/developer.ini
 
 RUN echo "www-data ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/www-data \
 && echo "Set disable_coredump false" >> /etc/sudo.conf
 
-# Enable xdebug & custom settings
-RUN phpenmod -v ALL -s ALL custom
+# Enable xdebug & developer settings
+RUN phpenmod -v ALL -s ALL developer
 
 USER www-data
